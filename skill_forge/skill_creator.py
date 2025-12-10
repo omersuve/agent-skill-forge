@@ -174,9 +174,18 @@ Return ONLY the skill name, nothing else. Use lowercase and hyphens."""
             # Extract SKILL.md if it's wrapped in markdown code blocks
             if "```" in content:
                 # Try to extract content between ```markdown and ``` or ``` and ```
-                match = re.search(r'```(?:markdown)?\n(.*?)\n```', content, re.DOTALL)
+                match = re.search(r'```(?:markdown|yaml)?\n(.*?)\n```', content, re.DOTALL)
                 if match:
                     content = match.group(1)
+                    # Remove any yaml code block markers from frontmatter
+                    content = re.sub(r'^```yaml\s*\n', '', content, flags=re.MULTILINE)
+                    content = re.sub(r'\n```\s*$', '', content, flags=re.MULTILINE)
+            
+            # Ensure frontmatter is not in code blocks - it should start with ---
+            if not content.startswith('---'):
+                # Try to find and fix frontmatter
+                content = re.sub(r'```yaml\s*\n---', '---', content)
+                content = re.sub(r'---\s*\n```', '---', content)
             
             return content
             

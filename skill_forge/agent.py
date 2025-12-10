@@ -2,6 +2,7 @@
 from typing import Dict, Optional
 import anthropic
 from .skill_loader import SkillLoader
+from .skill_creator import SkillCreator
 from .config import require_api_key
 from .prompts import SKILL_SELECTION_PROMPT, SKILL_EXECUTION_PROMPT
 
@@ -19,6 +20,7 @@ class SkillAgent:
         self.client = anthropic.Anthropic(api_key=self.api_key)
         self.model = model
         self.loader = SkillLoader()
+        self.creator = SkillCreator(model=model)
     
     def select_skill(self, query: str) -> Optional[str]:
         """Stage 1: Select skill using only metadata (progressive disclosure).
@@ -70,9 +72,34 @@ class SkillAgent:
             if selected_skill_name.lower() == 'none':
                 return None
             
+            # Try to match by name first
             for s in skills_with_metadata:
-                if s['metadata'].get('name', '').lower() == selected_skill_name.lower():
-                    return s['dir_name']  # Return directory name, not display name
+                metadata_name = s['metadata'].get('name', '').lower()
+                dir_name = s['dir_name'].lower()
+                selected_lower = selected_skill_name.lower()
+                
+                # Match by metadata name
+                if metadata_name == selected_lower:
+                    return s['dir_name']
+                
+                # Match by directory name (fallback)
+                if dir_name == selected_lower:
+                    return s['dir_name']
+                
+                # Partial match - if selected name contains key words from description
+                # This helps when LLM returns a variation
+                if selected_lower in metadata_name or metadata_name in selected_lower:
+                    return s['dir_name']
+            
+            # If no exact match, try fuzzy matching on description
+            query_lower = query.lower()
+            for s in skills_with_metadata:
+                desc = s['metadata'].get('description', '').lower()
+                # If query keywords match skill description, use it
+                if 'square root' in query_lower and 'square root' in desc:
+                    return s['dir_name']
+                if 'factorial' in query_lower and 'factorial' in desc:
+                    return s['dir_name']
             
             return None
             
@@ -119,12 +146,65 @@ class SkillAgent:
         except Exception as e:
             return f"Error executing skill: {e}"
     
-    def run(self, query: str, force_skill: Optional[str] = None) -> Dict:
+    def _handle_without_skill(self, query: str) -> str:
+        """Handle query without a skill using direct LLM call.
+        
+        Args:
+            query: User query to process.
+            
+        Returns:
+            LLM response as string.
+        """
+        try:
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=2000,
+                messages=[{
+                    "role": "user",
+                    "content": query
+                }]
+            )
+            return message.content[0].text.strip()
+        except Exception as e:
+            return f"Error processing query: {e}"
+    
+    def _extract_skill_description(self, query: str, result: str) -> str:
+        """Extract skill description from query and result for auto-creation.
+        
+        Args:
+            query: Original user query.
+            result: LLM result.
+            
+        Returns:
+            Skill description string.
+        """
+        # Ask LLM to create a skill description based on the query and result
+        try:
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=200,
+                messages=[{
+                    "role": "user",
+                    "content": f"""Based on this query and result, create a brief skill description for future similar queries.
+
+Query: {query}
+Result: {result[:500]}
+
+Return a concise description (1-2 sentences) of what this skill should do. Focus on the task type, not the specific values."""
+                }]
+            )
+            return message.content[0].text.strip()
+        except Exception:
+            # Fallback: use query as description
+            return f"Skill that handles: {query}"
+    
+    def run(self, query: str, force_skill: Optional[str] = None, auto_create: bool = True) -> Dict:
         """Run a query using the skills system with progressive disclosure.
         
         Args:
             query: User query to process.
             force_skill: Optional skill name to force (skip selection).
+            auto_create: If True, automatically create skill when none found (default: True).
             
         Returns:
             Dictionary with execution results and metadata.
@@ -135,7 +215,9 @@ class SkillAgent:
             'selected_skill': None,
             'stage2_skill_loaded': False,
             'output': None,
-            'error': None
+            'error': None,
+            'skill_created': False,
+            'created_skill_name': None
         }
         
         try:
@@ -149,7 +231,24 @@ class SkillAgent:
             result['selected_skill'] = selected_skill
             
             if not selected_skill:
-                result['error'] = "No suitable skill found for this query."
+                # No skill found - handle based on auto_create flag
+                if auto_create:
+                    # Handle query without skill
+                    output = self._handle_without_skill(query)
+                    result['output'] = output
+                    
+                    # Extract skill description and create skill
+                    skill_description = self._extract_skill_description(query, output)
+                    creation_result = self.creator.create_skill(skill_description)
+                    
+                    if creation_result['success']:
+                        result['skill_created'] = True
+                        result['created_skill_name'] = creation_result['skill_name']
+                    else:
+                        # Skill creation failed, but we still have the output
+                        result['error'] = f"Query handled but skill creation failed: {creation_result.get('error', 'Unknown error')}"
+                else:
+                    result['error'] = "No suitable skill found for this query."
                 return result
             
             # Stage 2: Load full skill and execute

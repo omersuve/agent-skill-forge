@@ -103,7 +103,8 @@ def new(
 @app.command()
 def run(
     query: str = typer.Argument(..., help="Query to execute using skills"),
-    skill: Optional[str] = typer.Option(None, "--skill", "-s", help="Force use of specific skill")
+    skill: Optional[str] = typer.Option(None, "--skill", "-s", help="Force use of specific skill"),
+    auto_create: bool = typer.Option(True, "--auto-create/--no-auto-create", help="Automatically create skill if none found (default: True)")
 ):
     """Run a query using the skills system with progressive disclosure."""
     try:
@@ -129,7 +130,7 @@ def run(
         typer.echo(f"🎯 Using forced skill: {skill}\n")
     
     typer.echo("🤖 Selecting and executing skill...\n")
-    result = agent.run(query, force_skill=skill)
+    result = agent.run(query, force_skill=skill, auto_create=auto_create)
     
     # Display results
     if result['error']:
@@ -137,20 +138,31 @@ def run(
         raise typer.Exit(1)
     
     if not result['selected_skill']:
-        typer.echo("⚠️  No suitable skill found for this query.")
-        typer.echo("\nAvailable skills:")
-        for skill_name in loader.discover_skills():
-            metadata = loader.load_metadata(skill_name)
-            if metadata:
-                typer.echo(f"  • {metadata.get('name')}: {metadata.get('description')}")
-        raise typer.Exit(1)
-    
-    typer.echo(f"✅ Selected skill: {result['selected_skill']}")
-    typer.echo(f"📄 Stage 2: Loaded full skill instructions\n")
-    typer.echo("─" * 60)
-    typer.echo("\n📤 Result:\n")
-    typer.echo(result['output'])
-    typer.echo("\n" + "─" * 60)
+        # No skill found - check if auto-create was used
+        if result.get('skill_created'):
+            typer.echo("⚠️  No suitable skill found, handled query directly.")
+            typer.echo(f"✨ Created new skill: {result['created_skill_name']}")
+            typer.echo("   (Next time, this skill will be used automatically)\n")
+            typer.echo("─" * 60)
+            typer.echo("\n📤 Result:\n")
+            typer.echo(result['output'])
+            typer.echo("\n" + "─" * 60)
+        else:
+            typer.echo("⚠️  No suitable skill found for this query.")
+            typer.echo("\nAvailable skills:")
+            for skill_name in loader.discover_skills():
+                metadata = loader.load_metadata(skill_name)
+                if metadata:
+                    typer.echo(f"  • {metadata.get('name')}: {metadata.get('description')}")
+            typer.echo("\n💡 Tip: Use --auto-create (default) to automatically create skills for new queries.")
+            raise typer.Exit(1)
+    else:
+        typer.echo(f"✅ Selected skill: {result['selected_skill']}")
+        typer.echo(f"📄 Stage 2: Loaded full skill instructions\n")
+        typer.echo("─" * 60)
+        typer.echo("\n📤 Result:\n")
+        typer.echo(result['output'])
+        typer.echo("\n" + "─" * 60)
 
 
 def main():

@@ -9,9 +9,12 @@ Available skills (metadata only):
 User query: {query}
 
 Your task:
-1. Analyze the user query
-2. Select the most appropriate skill from the list above
-3. Return ONLY the skill name (exactly as shown in the "name" field) or "none" if no skill matches
+1. Analyze the user query carefully
+2. Look for skills that match the query's intent, even if the wording is slightly different
+3. Select the most appropriate skill from the list above
+4. Return ONLY the skill name (exactly as shown in the "name" field) or "none" if no skill matches
+
+Important: Be generous in matching - if a skill can handle the query (even if not perfectly), select it. Only return "none" if truly no skill is relevant.
 
 Response format: Just the skill name, nothing else."""
 
