@@ -1,6 +1,5 @@
 """CLI entry point for skill-forge."""
 import typer
-from pathlib import Path
 from typing import Optional
 from .skill_loader import SkillLoader
 from .agent import SkillAgent

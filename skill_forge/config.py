@@ -1,10 +1,17 @@
 """Configuration management for skill-forge."""
 import os
+from pathlib import Path
 from typing import Optional
+from dotenv import load_dotenv
+
+# Load .env file if it exists
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
 
 
 def get_anthropic_api_key() -> Optional[str]:
-    """Get Anthropic API key from environment variable.
+    """Get Anthropic API key from environment variable or .env file.
     
     Returns:
         API key string or None if not set.

@@ -9,11 +9,11 @@ from .prompts import SKILL_SELECTION_PROMPT, SKILL_EXECUTION_PROMPT
 class SkillAgent:
     """Agent that orchestrates skills using progressive disclosure."""
     
-    def __init__(self, model: str = "claude-3-5-sonnet-20241022"):
+    def __init__(self, model: str = "claude-3-opus-20240229"):
         """Initialize the agent.
         
         Args:
-            model: Anthropic model to use (default: claude-3-5-sonnet-20241022)
+            model: Anthropic model to use (default: claude-3-opus-20240229)
         """
         self.api_key = require_api_key()
         self.client = anthropic.Anthropic(api_key=self.api_key)
@@ -27,18 +27,27 @@ class SkillAgent:
             query: User query to process.
             
         Returns:
-            Selected skill name or None if no skill matches.
+            Selected skill directory name or None if no skill matches.
         """
         # Load only metadata (Stage 1)
-        skills_metadata = self.loader.get_all_metadata()
+        # We need both metadata and directory names
+        skill_dirs = self.loader.discover_skills()
+        skills_with_metadata = []
+        for skill_dir in skill_dirs:
+            metadata = self.loader.load_metadata(skill_dir)
+            if metadata:
+                skills_with_metadata.append({
+                    'dir_name': skill_dir,
+                    'metadata': metadata
+                })
         
-        if not skills_metadata:
+        if not skills_with_metadata:
             return None
         
-        # Format metadata for prompt
+        # Format metadata for prompt (show display name, but we'll map to dir_name)
         metadata_text = "\n".join([
-            f"- {m.get('name', 'unknown')}: {m.get('description', 'No description')}"
-            for m in skills_metadata
+            f"- {s['metadata'].get('name', s['dir_name'])}: {s['metadata'].get('description', 'No description')}"
+            for s in skills_with_metadata
         ])
         
         # Call LLM to select skill
@@ -55,22 +64,22 @@ class SkillAgent:
                 }]
             )
             
-            selected_skill = message.content[0].text.strip()
+            selected_skill_name = message.content[0].text.strip()
             
-            # Validate selection
-            skill_names = [m.get('name', '').lower() for m in skills_metadata]
-            if selected_skill.lower() in skill_names or selected_skill.lower() == 'none':
-                if selected_skill.lower() == 'none':
-                    return None
-                # Find the actual skill name (case-insensitive)
-                for m in skills_metadata:
-                    if m.get('name', '').lower() == selected_skill.lower():
-                        return m.get('name')
+            # Map display name back to directory name
+            if selected_skill_name.lower() == 'none':
+                return None
+            
+            for s in skills_with_metadata:
+                if s['metadata'].get('name', '').lower() == selected_skill_name.lower():
+                    return s['dir_name']  # Return directory name, not display name
             
             return None
             
         except Exception as e:
             print(f"Error selecting skill: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def execute_skill(self, skill_name: str, query: str) -> str:
