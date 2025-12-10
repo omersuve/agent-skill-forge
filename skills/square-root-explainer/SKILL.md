@@ -1,0 +1,2 @@
+name: square-root-calculator
+description: Calculates the square root of a given positive number and provides a brief explanation of the concept. Use this skill when asked to find the square root of a specific number or to explain what a square root is.

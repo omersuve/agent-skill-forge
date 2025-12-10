@@ -25,7 +25,7 @@ class SkillAgent:
         self.sandbox = SandboxExecutor()
     
     def select_skill(self, query: str) -> Optional[str]:
-        """Stage 1: Select skill using only metadata (progressive disclosure).
+        """Stage 1: Select skill using skills-searcher first (efficient for large skill sets).
         
         Args:
             query: User query to process.
@@ -33,9 +33,108 @@ class SkillAgent:
         Returns:
             Selected skill directory name or None if no skill matches.
         """
-        # Load only metadata (Stage 1)
-        # We need both metadata and directory names
+        # First, use skills-searcher to filter skills (code-based, fast)
+        # This is efficient even with 10,000+ skills
+        try:
+            # Use skills-searcher directly (avoid recursion by calling sandbox directly)
+            skill_code = self.loader.load_skill_code('skills-searcher')
+            if skill_code:
+                # Extract inputs from query (simple extraction for search)
+                search_inputs = {'query': query, 'search_type': 'all'}
+                # Execute in sandbox directly
+                search_result_dict = self.sandbox.execute(skill_code, search_inputs)
+                import json
+                search_result = json.dumps(search_result_dict, indent=2)
+            else:
+                # If no skill_code.py, fall through to old method
+                raise Exception("skills-searcher skill_code.py not found")
+            
+            # Parse search result
+            import json
+            try:
+                search_data = json.loads(search_result)
+                candidate_skills = search_data.get('matches', [])
+                
+                if not candidate_skills:
+                    # No skills found by search, return None
+                    return None
+                
+                # If only one match, use it directly
+                if len(candidate_skills) == 1:
+                    return candidate_skills[0]['directory']
+                
+                # If multiple matches, use LLM to select the best one
+                # But only send the candidate skills (much smaller prompt!)
+                skills_with_metadata = []
+                for match in candidate_skills:
+                    skill_dir = match['directory']
+                    metadata = self.loader.load_metadata(skill_dir)
+                    if metadata:
+                        skills_with_metadata.append({
+                            'dir_name': skill_dir,
+                            'metadata': metadata
+                        })
+                
+                if not skills_with_metadata:
+                    return None
+                
+                # Format only candidate skills for prompt (much smaller!)
+                metadata_text = "\n".join([
+                    f"- {s['metadata'].get('name', s['dir_name'])}: {s['metadata'].get('description', 'No description')}"
+                    for s in skills_with_metadata
+                ])
+                
+                # Call LLM to select best skill from candidates
+                message = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=100,
+                    messages=[{
+                        "role": "user",
+                        "content": SKILL_SELECTION_PROMPT.format(
+                            skills_metadata=metadata_text,
+                            query=query
+                        )
+                    }]
+                )
+                
+                selected_skill_name = message.content[0].text.strip()
+                
+                # Map display name back to directory name
+                if selected_skill_name.lower() == 'none':
+                    # Return first candidate if LLM says none
+                    return candidate_skills[0]['directory'] if candidate_skills else None
+                
+                # Try to match by name
+                for s in skills_with_metadata:
+                    metadata_name = s['metadata'].get('name', '').lower()
+                    dir_name = s['dir_name'].lower()
+                    selected_lower = selected_skill_name.lower()
+                    
+                    if metadata_name == selected_lower or dir_name == selected_lower:
+                        return s['dir_name']
+                    
+                    if selected_lower in metadata_name or metadata_name in selected_lower:
+                        return s['dir_name']
+                
+                # Fallback: return first candidate
+                return candidate_skills[0]['directory'] if candidate_skills else None
+                
+            except json.JSONDecodeError:
+                # If search result is not JSON, fall through to old method
+                pass
+        except Exception as e:
+            # If skills-searcher fails, fall through to old method
+            print(f"Skills-searcher failed, falling back: {e}")
+        
+        # Fallback: Old method (for small skill sets or if skills-searcher fails)
         skill_dirs = self.loader.discover_skills()
+        
+        # If too many skills, don't load all metadata
+        if len(skill_dirs) > 100:
+            # For large skill sets, we should have used skills-searcher
+            # If we're here, something went wrong
+            return None
+        
         skills_with_metadata = []
         for skill_dir in skill_dirs:
             metadata = self.loader.load_metadata(skill_dir)
@@ -48,7 +147,7 @@ class SkillAgent:
         if not skills_with_metadata:
             return None
         
-        # Format metadata for prompt (show display name, but we'll map to dir_name)
+        # Format metadata for prompt
         metadata_text = "\n".join([
             f"- {s['metadata'].get('name', s['dir_name'])}: {s['metadata'].get('description', 'No description')}"
             for s in skills_with_metadata
@@ -70,45 +169,25 @@ class SkillAgent:
             
             selected_skill_name = message.content[0].text.strip()
             
-            # Map display name back to directory name
             if selected_skill_name.lower() == 'none':
                 return None
             
-            # Try to match by name first
+            # Try to match by name
             for s in skills_with_metadata:
                 metadata_name = s['metadata'].get('name', '').lower()
                 dir_name = s['dir_name'].lower()
                 selected_lower = selected_skill_name.lower()
                 
-                # Match by metadata name
-                if metadata_name == selected_lower:
+                if metadata_name == selected_lower or dir_name == selected_lower:
                     return s['dir_name']
                 
-                # Match by directory name (fallback)
-                if dir_name == selected_lower:
-                    return s['dir_name']
-                
-                # Partial match - if selected name contains key words from description
-                # This helps when LLM returns a variation
                 if selected_lower in metadata_name or metadata_name in selected_lower:
-                    return s['dir_name']
-            
-            # If no exact match, try fuzzy matching on description
-            query_lower = query.lower()
-            for s in skills_with_metadata:
-                desc = s['metadata'].get('description', '').lower()
-                # If query keywords match skill description, use it
-                if 'square root' in query_lower and 'square root' in desc:
-                    return s['dir_name']
-                if 'factorial' in query_lower and 'factorial' in desc:
                     return s['dir_name']
             
             return None
             
         except Exception as e:
             print(f"Error selecting skill: {e}")
-            import traceback
-            traceback.print_exc()
             return None
     
     def _extract_inputs_from_query(self, query: str, skill_content: str) -> Dict:
@@ -235,6 +314,21 @@ Return ONLY valid JSON, nothing else."""
         # Special handling for code-executor skill
         if skill_name == 'code-executor':
             return self._execute_code_executor(query, skill_content)
+        
+        # Special handling for skills-searcher skill (avoid recursion in select_skill)
+        if skill_name == 'skills-searcher':
+            # Direct execution without calling execute_skill again
+            skill_code = self.loader.load_skill_code(skill_name)
+            if skill_code:
+                try:
+                    # Extract inputs from query
+                    inputs = self._extract_inputs_from_query(query, skill_content)
+                    # Execute in sandbox
+                    result = self.sandbox.execute(skill_code, inputs)
+                    import json
+                    return json.dumps(result, indent=2)
+                except Exception as e:
+                    return f"Error executing skills-searcher: {e}"
         
         # Stage 3: Check if skill_code.py exists
         skill_code = self.loader.load_skill_code(skill_name)
