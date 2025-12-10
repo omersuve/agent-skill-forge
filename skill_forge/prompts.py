@@ -55,3 +55,31 @@ Your task:
 
 Return the complete SKILL.md file content, including the YAML frontmatter and markdown body."""
 
+
+CODE_GENERATION_PROMPT = """Generate deterministic Python code for the skill '{skill_name}'.
+
+Skill Description:
+{description}
+
+Skill Instructions (SKILL.md):
+{skill_content}
+
+Your task:
+1. Generate a pure Python function `run_skill(inputs: dict) -> dict`
+2. The function must be deterministic (same inputs = same outputs)
+3. Only use safe Python stdlib modules: json, math, csv, re, statistics
+4. No filesystem access, no network access
+5. Extract inputs from the inputs dictionary
+6. Return results as a dictionary
+
+Example structure:
+```python
+def run_skill(inputs: dict) -> dict:
+    # Extract inputs
+    # Process using safe modules only
+    # Return result as dict
+    return {{"result": ...}}
+```
+
+Return ONLY the Python code, nothing else."""
+

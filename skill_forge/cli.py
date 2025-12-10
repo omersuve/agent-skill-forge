@@ -158,7 +158,15 @@ def run(
             raise typer.Exit(1)
     else:
         typer.echo(f"✅ Selected skill: {result['selected_skill']}")
-        typer.echo(f"📄 Stage 2: Loaded full skill instructions\n")
+        typer.echo(f"📄 Stage 2: Loaded full skill instructions")
+        
+        # Check if code was executed (Stage 3)
+        skill_code = loader.load_skill_code(result['selected_skill'])
+        if skill_code:
+            typer.echo(f"⚡ Stage 3: Executed skill_code.py in sandbox (0 tokens, fast!)\n")
+        else:
+            typer.echo(f"📝 Stage 2: Using LLM execution\n")
+        
         typer.echo("─" * 60)
         typer.echo("\n📤 Result:\n")
         typer.echo(result['output'])
