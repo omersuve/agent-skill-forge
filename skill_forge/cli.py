@@ -3,6 +3,7 @@ import typer
 from typing import Optional
 from .skill_loader import SkillLoader
 from .agent import SkillAgent
+from .skill_creator import SkillCreator
 from .config import require_api_key
 
 app = typer.Typer(
@@ -47,16 +48,56 @@ def list_skills(
 
 
 @app.command()
-def new():
-    """Interactively create a new skill."""
+def new(
+    description: Optional[str] = typer.Option(None, "--description", "-d", help="Skill description"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="Skill name (directory name)")
+):
+    """Interactively create a new skill using the skill-creator skill."""
+    try:
+        # Check API key
+        require_api_key()
+    except ValueError as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(1)
+    
     typer.echo("🚀 Skill Creator")
-    typer.echo("This will guide you through creating a new skill.\n")
-    typer.echo("⚠️  Skill creation with LLM not yet implemented.")
-    typer.echo("For now, create skills manually in the skills/ directory.")
-    typer.echo("\nExample structure:")
-    typer.echo("  skills/my-skill/")
-    typer.echo("    SKILL.md")
-    typer.echo("    (optional) skill_code.py")
+    typer.echo("Creating a new skill using the skill-creator skill...\n")
+    
+    # Get skill description
+    if not description:
+        description = typer.prompt("Describe what this skill should do")
+    
+    if not description.strip():
+        typer.echo("❌ Skill description cannot be empty.")
+        raise typer.Exit(1)
+    
+    typer.echo(f"\n📝 Description: {description}\n")
+    
+    # Initialize skill creator
+    creator = SkillCreator()
+    
+    # Check if skill-creator skill exists
+    if not creator.load_skill_creator_instructions():
+        typer.echo("❌ skill-creator skill not found.")
+        typer.echo("Please ensure skills/skill-creator/SKILL.md exists.")
+        raise typer.Exit(1)
+    
+    typer.echo("🤖 Generating skill using LLM...\n")
+    
+    # Create skill
+    result = creator.create_skill(description, skill_name=name)
+    
+    if result['error']:
+        typer.echo(f"❌ Error: {result['error']}")
+        raise typer.Exit(1)
+    
+    if result['success']:
+        typer.echo("✅ Skill created successfully!\n")
+        typer.echo(f"📁 Skill name: {result['skill_name']}")
+        typer.echo(f"📂 Location: {result['skill_path']}")
+        typer.echo(f"\n📄 File: {result['skill_path']}/SKILL.md")
+        typer.echo("\n✨ You can now use this skill with:")
+        typer.echo(f"   skill-forge run \"your query\" --skill {result['skill_name']}")
 
 
 @app.command()

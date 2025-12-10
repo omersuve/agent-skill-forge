@@ -30,3 +30,25 @@ Your task:
 
 Response:"""
 
+
+SKILL_CREATION_PROMPT = """You are creating a new skill using the skill-creator guidelines.
+
+Skill Creator Instructions:
+{skill_creator_instructions}
+
+User's Skill Description:
+{user_description}
+
+Your task:
+1. Follow the skill-creator instructions above to create a complete SKILL.md file
+2. Include proper YAML frontmatter with:
+   - name: (hyphenated skill name)
+   - description: (clear description of what the skill does and when to use it)
+3. Write the skill body with:
+   - Clear instructions on when to use the skill
+   - Input/output specifications
+   - Usage examples if helpful
+   - Keep it concise and focused
+
+Return the complete SKILL.md file content, including the YAML frontmatter and markdown body."""
+
